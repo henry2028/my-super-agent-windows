@@ -6,7 +6,7 @@
 
 这是基于 DeepSeek Harness（DSH）Super-agent 原型改造的 Windows 版本。它接收本地工单，并可选接入飞书或 GitHub，交由 DSH 会话处理，再按任务需要调用 Codex、Claude Code 或用户配置的其他 CLI 智能体。
 
-本项目是研究原型，请在自己的环境验证后使用。上游文章中的部分设计是未来方向，本实现的验收范围见 [功能核对](VERIFICATION.md)。
+本项目是研究原型，请在自己的环境验证后使用。上游文章中的部分设计是未来方向，已验证独立安装、本地工单、Codex 真实调用和核心调度；飞书、GitHub 及 Claude 的实际连接需要各安装者验收。
 
 ### 功能
 
@@ -65,7 +65,7 @@ node .\bin\workers.mjs superagent-windows probe claude
 
 启用飞书后，在面板配置专用机器人 CLI、允许的发送者和聊天范围。若使用 dsh-im，需要在同一 profile 安装支持 `exclusive-text-consumer` 的版本，并选择相应接入方式。机器人聊天中发送 `/ws` 列出工作区，`/ws 序号` 选择，`/ws --default` 返回默认工作区。共享调度会话跟随最近一次明确选择。多个工单并行时，引用目标工单的原消息再切换，可定位当前工单。工作区归组与实际执行目录分别管理。
 
-启用 GitHub 后，在面板配置仓库、执行账号和接单策略。账户准备及来源设置见 [部署设计](docs/006-deployment.md)。本地工单无需配置这些账号。
+启用 GitHub 后，在面板配置仓库、执行账号和接单策略。使用拥有目标仓库写入权限的机器人 GitHub 用户账号，安装 GitHub CLI 并在独立配置目录登录，在面板填写该 CLI。飞书自建应用需启用机器人、消息接收与发送以及聊天成员读取权限，并发布应用版本。为机器人准备独立的 lark-cli 配置，并设置 strict mode 为 bot。本地工单无需配置这些账号。
 
 ### 故障排查与更新
 
@@ -78,7 +78,7 @@ node .\bin\workers.mjs superagent-windows probe claude
 
 This Windows edition adapts the DeepSeek Harness (DSH) Super-agent prototype. It accepts local work orders, optionally receives Feishu or GitHub requests, and coordinates DSH sessions with Codex, Claude Code, and operator-configured CLI workers.
 
-This is a research prototype. Validate it in your environment before relying on it. Some ideas in the upstream design article remain future work. See [verification](VERIFICATION.md) for the tested scope and known limitations.
+This is a research prototype. Validate it in your environment before relying on it. Some ideas in the upstream design article remain future work. Independent installation, local intake, a real Codex request, and core scheduling have been verified. Feishu, GitHub, and Claude connections require validation by each installer.
 
 ### Features
 
@@ -137,7 +137,7 @@ Anyone able to write to the local ticket directory acts as the local operator. D
 
 After enabling Feishu, configure a dedicated bot CLI, allowed senders, and chat scope in the panel. For dsh-im, install a version supporting `exclusive-text-consumer` in the same profile and select its transport. In the bot chat, send `/ws` to list workspaces, `/ws <number>` to select one, or `/ws --default` to return to the default. The shared dispatcher follows the most recent explicit selection. When multiple tickets are active, reply to a ticket's original message to select that ticket. Display grouping and the actual execution directory are managed separately.
 
-After enabling GitHub, configure the repository, execution account, and intake policy in the panel. See the [deployment design](docs/006-deployment.md) for account and source setup. Local work orders do not require either account.
+After enabling GitHub, configure the repository, execution account, and intake policy in the panel. Use a bot GitHub user with write access, install the GitHub CLI, authenticate it with an isolated configuration directory, and specify that CLI in the panel. A Feishu self-built app needs bot capability, message receive/send and chat-member read permissions, and a published version. Give its lark-cli a separate configuration with strict mode set to bot. Local work orders do not require either account.
 
 ### Troubleshooting and updates
 
@@ -146,8 +146,6 @@ After enabling GitHub, configure the repository, execution account, and intake p
 - If a ticket does not continue, inspect its execution state, dependencies, worker result, and any pending human input.
 - Stop the dedicated profile before updating, run `git pull` in the checkout, and run the original deployment command again. Keep the state directory to retain ticket history.
 
-## Documentation and license
+## License / 许可证
 
-- [Windows setup guide](WINDOWS-SETUP.md) · [Verification](VERIFICATION.md)
-- [Original design documentation](docs/) · [Deployment](docs/006-deployment.md) · [Architecture](docs/007-architecture.md)
-- [MIT license](LICENSE) · [Workspace compatibility license](compat/workspace/LICENSE)
+[MIT](LICENSE) · [Workspace compatibility license](compat/workspace/LICENSE)

@@ -57,7 +57,7 @@ const MOVED: Record<string, string> = {
 /** Read machine settings and reject unknown configuration keys (naming where deprecated keys moved). */
 export function machineOf(config: DeploymentConfig): Machine {
   const unknown = Object.keys(config).filter(key => !(key in (Config.dict ?? {})))
-  if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; docs/006-deployment.md lists the keys`)
+  if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; README.md lists the keys`)
   const { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, workers } = config
   // The concurrency limit has one source only: the plugin config workers.maxWorkers. The panel keeps no second entry.
   return { stateDir, maxWorkers: workers.maxWorkers, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs }

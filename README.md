@@ -61,6 +61,23 @@ node .\bin\workers.mjs superagent-windows probe claude
 
 本地工单目录的写入者等同于本机操作者。DSH 执行会话使用完整工具权限，请控制对该目录和飞书接单范围的访问。
 
+### 使用流程示例：飞书派单与多智能体协作
+
+以下以修复项目测试为例。开始前，启用并配置飞书工单机器人、允许的发送者和聊天范围，确认 DSH 模型以及需要使用的 Codex、Claude Code 已登录且连接探针通过。
+
+1. **选择工作区。** 在飞书工单机器人聊天中发送 `/ws`，再根据返回的列表发送 `/ws 2` 等命令。工作区决定会话在 DSH 侧栏中的归组；工单执行目录仍由工单配置决定。如果多个工单同时进行，引用目标工单的原消息发送工作区命令。
+2. **发送工单。** 私聊机器人，或在已配置接收范围的群聊中按机器人接收方式 @ 它。例如：
+
+   > 请检查 `C:\work\my-project` 中失败的测试，修复相关代码并运行验证。请安排两个 worker 分别调查测试失败与相关实现，再请 Codex 对最终改动做独立审核。不要修改其他目录；遇到需要决定的问题先询问我。
+
+   写明目标、项目绝对路径、允许修改的范围、验收标准和期望的协作方式。也可以要求 Claude Code 或已配置的自定义 worker 承担某一步。
+3. **接单和建计划。** 系统按飞书来源、发送者、聊天范围及策略判断是否接单。接单后，主会话路由工单，工单会话读取上下文并登记分工计划，写明步骤、依赖、允许的读写范围及审核要求。用户可在 DSH 的 Super-agent 执行页查看工单和甘特图。
+4. **派发和并行执行。** 工单会话根据计划调用 `worker_start`，为每个 worker 指定运行时、工作目录和任务说明，再把返回的 worker 编号绑定到计划。可独立开展的调查可以并行；进程池限制并发，同一目录同一时间只由一个进程占用。需要并行时，使用不同的现有任务目录或隔离的工作副本，并明确共享项目的只读范围。实际派发由模型执行，登记计划本身不会自动启动进程。
+5. **汇总与审核。** 各 worker 结束后，结果回传给发起它的工单会话；工单会话读取调查结果、完成或整合修改并运行检查。依赖完成后，再启动要求的 Codex／Claude 等审核 worker，读取审核意见、处理问题并记录证据。进程成功退出本身不代表审核通过。
+6. **查看结果或继续沟通。** 工单会话更新计划并报告结果，满足完成检查后由系统向原飞书会话回传。若等待用户决定或发生实际阻碍，查看飞书消息及执行页的状态，回复所需信息后继续。甘特图显示排队、执行、依赖及归属；飞书中也可引用原消息补充同一工单。
+
+这是一个分工示例，实际并发数、步骤和执行顺序取决于任务、目录占用与配置。可根据需要在工单中明确指定 worker；先用连接探针确认对应 CLI 可用。
+
 ### 飞书与 GitHub
 
 启用飞书后，在面板配置专用机器人 CLI、允许的发送者和聊天范围。若使用 dsh-im，需要在同一 profile 安装支持 `exclusive-text-consumer` 的版本，并选择相应接入方式。机器人聊天中发送 `/ws` 列出工作区，`/ws 序号` 选择，`/ws --default` 返回默认工作区。共享调度会话跟随最近一次明确选择。多个工单并行时，引用目标工单的原消息再切换，可定位当前工单。工作区归组与实际执行目录分别管理。
@@ -132,6 +149,23 @@ Connections are stored in `profiles/<profile>/workers.json` under DSH home. Keep
 4. Request Codex or Claude review explicitly in the ticket. A ticket session can also call `worker_start` with a `runtime` and inspect the result with `worker_status`. The default Codex first-model-response timeout is five minutes.
 
 Anyone able to write to the local ticket directory acts as the local operator. DSH execution sessions have full tool permissions, so control access to that directory and to the Feishu intake scope.
+
+### Example workflow: Feishu dispatch and multi-agent collaboration
+
+This example fixes failing project tests. First enable and configure the Feishu work-order bot, its allowed senders and chat scope. Confirm that the DSH model and the Codex or Claude Code workers you intend to use are signed in and pass their connection probes.
+
+1. **Choose a workspace.** Send `/ws` to the Feishu work-order bot, then choose an entry with a command such as `/ws 2`. The workspace groups sessions in the DSH sidebar; the ticket configuration still determines the execution directory. When multiple tickets are active, reply to the target ticket's original message to issue its workspace command.
+2. **Send a work order.** Message the bot privately, or @ it in an enabled group according to the bot's intake configuration. For example:
+
+   > Investigate the failing tests in `C:\work\my-project`, fix the relevant code, and run the checks. Assign two workers to investigate the failures and related implementation, then ask Codex for an independent review of the final changes. Do not modify other directories; ask me when a decision is needed.
+
+   Include the goal, absolute project path, permitted changes, acceptance criteria, and desired collaboration. You can request Claude Code or a configured custom worker for a specific step.
+3. **Intake and planning.** The system evaluates the Feishu source, sender, chat scope, and policy. Once accepted, the main session routes the ticket. Its execution session reads context and records a plan with steps, dependencies, read/write boundaries, and review requirements. Inspect the ticket and Gantt chart on the DSH Super-agent execution page.
+4. **Dispatch and parallel work.** The ticket session calls `worker_start` with each worker's runtime, directory, and handoff, then binds the returned worker ID to the plan. Independent investigations may run in parallel, subject to pool capacity and the one-process-per-directory rule. Use distinct existing task directories or isolated working copies and identify shared source paths as read-only where appropriate. The model performs dispatch; recording a plan alone does not start processes.
+5. **Integrate and review.** Completed workers return results to the requesting ticket session. It reads the findings, completes or integrates changes, and runs checks. Once dependencies are complete, it starts the requested Codex, Claude, or other review worker, reads findings, addresses issues, and records evidence. A successful process exit alone does not establish review approval.
+6. **Receive results or continue.** The ticket session updates the plan and reports its outcome. After completion checks pass, the system replies to the originating Feishu conversation. If a decision or real blocker needs attention, inspect the Feishu message and execution page, then reply with the needed information. Use the Gantt chart to inspect queues, execution, dependencies, and ownership; reply to the original Feishu message to add a follow-up to the ticket.
+
+This is an example split. Actual concurrency, steps, and ordering depend on the task, directory reservations, and configuration. Name the workers you want in the request and verify their CLIs with connection probes first.
 
 ### Feishu and GitHub
 

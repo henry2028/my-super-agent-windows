@@ -12,6 +12,13 @@ const file = join(dir, 'workers.json')
 const connections = readConnections(file)
 const runtimes = () => [codexRuntime(connections.codex), claudeRuntime(connections.claude), ...configuredRuntimes(connections)]
 
+function failureHint(text) {
+  if (/\b401\b|\b403\b|not logged in|invalid api key|unauthorized/i.test(text)) return 'Check the CLI account or API credentials.'
+  if (/\b429\b|quota|rate.limit/i.test(text)) return 'Check provider quota and rate limits.'
+  if (/ECONNREFUSED|ENOTFOUND|unable to connect|connection refused|\b50[234]\b/i.test(text)) return 'Check the configured provider and any local relay or proxy.'
+  return 'Run the CLI directly under this Windows account to check login, model and any local relay.'
+}
+
 if (action === 'list') {
   for (const runtime of runtimes()) console.log(`${runtime.name}: ${await runtime.available() ? 'executable found' : 'executable missing'}`)
 } else if (action === 'probe') {
@@ -25,10 +32,13 @@ if (action === 'list') {
       { output() {}, exited })
     const timer = setTimeout(() => { void handle.stop('connection probe timed out').catch(() => {}) }, 310_000)
     try {
-      if (await done !== 0 || !(await handle.artifacts()).summary.includes('WORKER_OK')) {
-        throw new Error('Worker probe failed. Run the CLI directly under this Windows account to check login, model and network.')
+      const code = await done
+      const answer = (await handle.artifacts()).summary
+      if (code !== 0 || answer.trim() !== 'WORKER_OK') {
+        const detail = (await handle.status()).detail ?? ''
+        throw new Error(`Worker probe failed (exit ${code ?? 'signal'}). ${failureHint(answer + '\n' + detail)}`)
       }
-      console.log(`${runtime.name}: authenticated request completed`)
+      console.log(`${runtime.name}: request completed`)
     } finally { clearTimeout(timer) }
   } finally { rmSync(cwd, { recursive: true, force: true }) }
 } else if (action === 'configure') {

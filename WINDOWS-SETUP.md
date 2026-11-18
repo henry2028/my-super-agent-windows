@@ -23,7 +23,7 @@ node .\bin\workers.mjs superagent-windows probe codex
 node .\bin\workers.mjs superagent-windows probe claude
 ```
 
-`list` 检查可执行文件。找不到时，选 `configure` 后填原生 `.exe` 的绝对路径，模型留空使用 CLI 默认。两者分别配置。 `probe` 在临时目录发出一次真实模型请求，可能计入用量。看到 `authenticated request completed` 即可重启专用 profile 后派工。若检测到 CLI 但请求失败，用同一 Windows 用户先直接运行该 CLI，验证账号、模型及网络访问。
+`list` 检查可执行文件。找不到时，选 `configure` 后填原生 `.exe` 的绝对路径，模型留空使用 CLI 默认。两者分别配置。 `probe` 在临时目录发出一次真实模型请求，可能计入用量。看到 `request completed` 即可重启专用 profile 后派工。若检测到 CLI 但请求失败，用同一 Windows 用户先直接运行该 CLI，验证账号、模型及网络访问。若 CLI 配置了本机模型转发，请先启动转发服务，再运行探针。
 
 在工单写明「用 Codex 审核这次代码改动」或「用 Claude Code 复核这份交付」。工单会话可以用 `worker_start` 指定 `runtime: codex` 或 `runtime: claude`，在 `worker_status` 获取结果。DSH Codex worker 首次模型响应预算为 5 分钟。
 

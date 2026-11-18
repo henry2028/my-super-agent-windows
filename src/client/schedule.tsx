@@ -46,7 +46,7 @@ export function ScheduleChart({ data, onChanged }: { data: Schedule; onChanged: 
         <div className="dt-schedule-axis">{[0, 1, 2, 3, 4].map(tick => <span key={tick}
           style={{ left: `${tick * 25}%` }}>{stamp(start + tick * (now - start) / 4)}</span>)}</div>
         {rows.map(row => <div className="dt-schedule-row" data-child={!!row.parentTicketId} key={`${row.kind}:${row.id}`}>
-          <button type="button" className="dt-schedule-label dt-open" aria-pressed={selected === row.id}
+          <button type="button" className="dt-schedule-label" aria-pressed={selected === row.id}
             onClick={() => setSelected(row.id)} title={row.title}>
             <span>{row.kind === 'ticket' ? t('scheduleTickets') : row.runtime} · {row.title}</span>
             {row.taskKind && <small>{t(row.taskKind === 'review' ? 'scheduleReview' : 'scheduleWork')}</small>}

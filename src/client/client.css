@@ -7,6 +7,8 @@
 .dt-schedule-label { min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 10px 12px; border: 0; border-bottom: 0.5px solid var(--dsw-alias-border-l3); text-align: left; background: var(--dsw-alias-bg-layer-2); color: inherit; }
 .dt-schedule-label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dt-schedule-label small { color: var(--dsw-alias-label-tertiary); }
+button.dt-schedule-label { cursor: pointer; }
+button.dt-schedule-label:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
 .dt-schedule-label[aria-pressed=true] { background: var(--dsw-alias-interactive-bg-hover); }
 .dt-schedule-axis { position: relative; height: 36px; margin: 0 24px; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
 .dt-schedule-axis span { position: absolute; top: 10px; transform: translateX(-50%); white-space: nowrap; }

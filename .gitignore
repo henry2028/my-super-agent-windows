@@ -1,0 +1,16 @@
+node_modules/
+lib/
+.artifacts/
+.env
+.env.*
+!.env.example
+*.log
+*.sqlite
+*.sqlite-*
+*.tmp
+workers.json
+.credentials.yaml
+auth.json
+reports/
+tmp/
+coverage/

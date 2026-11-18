@@ -1,0 +1,6 @@
+# 统一按 LF 检出：仓库的文档解析、文本断言都假设 \n 结尾，Windows 的 core.autocrlf 会破坏它们。
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
+compat/workspace/grouping.patch whitespace=-space-before-tab

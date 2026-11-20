@@ -10,6 +10,7 @@ import { key, liveTicket, type Ticket } from '../core/index.ts'
 import { mandateInstructions, ticketOfSession } from '../executor/dsh.ts'
 import type { HealthEntry } from '../infra/health.ts'
 import { AgentDelivery, messageId } from './delivery.ts'
+import { requiresIterative } from './delegation.ts'
 import type { Effects } from './effects.ts'
 import type { Variable } from './execution-environment.ts'
 import { RetryHealth } from './retry-health.ts'
@@ -66,6 +67,8 @@ declare module '@deepseek-ai/cordis' {
  */
 const WORK_TOOLS = ['worker_start', 'worker_status', 'worker_stop', 'codex_worker_start', 'codex_worker_status', 'codex_worker_stop', 'read', 'write', 'edit', 'read_image', 'glob', 'grep', 'bash', 'pwsh', 'job_output', 'job_list', 'job_kill', 'web_search',
   'web_fetch', 'skill', 'todo_write', 'subagent', 'list_subagent_models', 'send_message', 'list_agents', 'interrupt_agent']
+const ITERATIVE_TOOLS = new Set(['worker_start', 'worker_status', 'worker_stop', 'codex_worker_start', 'codex_worker_status',
+  'codex_worker_stop', 'read', 'read_image', 'glob', 'grep', 'web_search', 'web_fetch', 'skill', 'todo_write'])
 /**
  * 按名单收紧工具。某个名字在本平台不存在时（Windows 上没有 bash 工具，只有 pwsh），
  * restrict 会拒绝整份名单并点名那些名字——摘掉它们再试。写死名单曾让整个插件在 Windows 上装不上。
@@ -413,7 +416,9 @@ export class Sessions {
       const version = this.promptFor(agent, context.signal !== undefined)
       const current = ticket && host.store.tickets.get(ticket.id)
       const composed = host.prompts.compose(version.config, master ? 'orchestrator' : 'worker', current ? host.environment(current) : undefined)
-      return `[dsh-superagent prompt revision ${version.revision}]\n${composed}\n${current ? mandateInstructions(current.mandate) : ''}`
+      const iterative = current && requiresIterative(host.store, current)
+        ? '\nIterative mode is required for this ticket. You coordinate only. See orchestrator_plan and use plan_step to dispatch one version at a time.' : ''
+      return `[dsh-superagent prompt revision ${version.revision}]\n${composed}\n${current ? mandateInstructions(current.mandate) : ''}${iterative}`
     }, ...(master ? { complete: true } : {}) }))
     // A recreated skill scope (e.g. after the skills service restarts) starts empty, so reset `binding.skills` before rebinding.
     const skillScope = agent.ctx.inject(['skills'], scope => {
@@ -458,9 +463,11 @@ export class Sessions {
     const store = this.host.store
     const parent = scopeParentOf(agent)
     const wanted = WORK_TOOLS.filter(name => agent.ctx.tools.get(name, parent))
-    return [restrictTools(agent.ctx.tools, wanted), agent.ctx.tools.guard(() => {
+    return [restrictTools(agent.ctx.tools, wanted), agent.ctx.tools.guard(({ name }) => {
       const current = store.tickets.get(ticketId)
-      return !current || !liveTicket(current) ? 'Ticket ended; new work needs a new authorized ticket' : undefined
+      if (!current || !liveTicket(current)) return 'Ticket ended; new work needs a new authorized ticket'
+      if (requiresIterative(store, current) && !ITERATIVE_TOOLS.has(name) && !name.startsWith('orchestrator_'))
+        return 'Iterative ticket: dispatch production to a process worker; this Session coordinates and reviews results'
     })]
   }
   /**

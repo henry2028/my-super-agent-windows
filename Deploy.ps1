@@ -22,8 +22,9 @@ try {
     if (!$DshBin) {
         $runtime = Join-Path $PSScriptRoot '.artifacts/dsh-runtime'
         $DshBin = Join-Path $runtime 'node_modules/@deepseek-ai/dsh/lib/bin.js'
-        if (!(Test-Path -LiteralPath $DshBin)) {
-            & $npm install --prefix $runtime --no-audit --no-fund --save-exact '@deepseek-ai/dsh@0.2.2-rc.1'
+        $installedVersion = if (Test-Path -LiteralPath $DshBin) { & $node -p "require('./.artifacts/dsh-runtime/node_modules/@deepseek-ai/dsh/package.json').version" } else { '' }
+        if ($installedVersion -ne '0.2.2-rc.5') {
+            & $npm install --prefix $runtime --no-audit --no-fund --save-exact '@deepseek-ai/dsh@0.2.2-rc.5'
             if ($LASTEXITCODE) { throw 'DSH installation failed.' }
         }
     }

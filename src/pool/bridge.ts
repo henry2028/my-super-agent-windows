@@ -7,7 +7,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises'
 import { modelKeyEnv } from './credentials.ts'
 import { isAbsolute, join } from 'node:path'
 import { claudeRuntime } from './claude.ts'
@@ -17,6 +17,7 @@ import { WorkerPool } from './pool.ts'
 import type { RuntimeName, WorkerOutcome, WorkerRuntime, WorkerSpec, WorkerOwnership } from './types.ts'
 import type { Runtime } from '../app/runtime.ts'
 import { configuredRuntimes, readConnections } from './connections.ts'
+import { ticketOfSession } from '../executor/dsh.ts'
 
 /** 桥的配置：并发上限、dsh 用哪个 profile、是否启用 Codex、单票墙钟上限。 */
 export interface WorkerBridgeOptions {
@@ -104,8 +105,9 @@ export function installWorkers(ctx: Context, stateDir: string, options: WorkerBr
     for (const runtime of runtimes) if (await runtime.available()) return runtime.name
     throw new Error('没有可用的 worker runtime：Codex 未安装，dsh 也起不来。')
   }
+  const orchestration = () => (ctx as Context & { orchestrator?: Runtime }).orchestrator
   const ownerOf = async (sessionId: string): Promise<WorkerOwnership> => {
-    const sessions = (ctx as Context & { orchestrator?: Runtime }).orchestrator?.sessions
+    const sessions = orchestration()?.sessions
     return sessions ? sessions.processOwner(sessionId) : { ownerSessionId: sessionId, rootSessionId: sessionId }
   }
   const visible = async (record: import('./table.ts').WorkerRecord, execution: any) => {
@@ -118,7 +120,7 @@ export function installWorkers(ctx: Context, stateDir: string, options: WorkerBr
   }
 
   /** 校验目录与独占，入池排队；进程结束后把结果写盘并回灌给发起它的会话。 */
-  const start = async (args: { directory?: unknown; prompt?: unknown; runtime?: unknown }, execution: any) => {
+  const start = async (args: { directory?: unknown; prompt?: unknown; runtime?: unknown; plan_step?: unknown }, execution: any) => {
     if (typeof args.directory !== 'string' || !isAbsolute(args.directory) || typeof args.prompt !== 'string' || !args.prompt.trim())
       throw new Error('directory and prompt are required; directory must be absolute')
     const asked = args.runtime === undefined ? undefined : runtimes.find(runtime => runtime.name === args.runtime)?.name
@@ -130,25 +132,56 @@ export function installWorkers(ctx: Context, stateDir: string, options: WorkerBr
     const ownerSessionId = execution?.agent?.id && String(execution.agent.id)
     if (!ownerSessionId) throw new Error('worker_start requires a requesting Session')
     const ownership = await ownerOf(ownerSessionId)
+    if (args.plan_step !== undefined && typeof args.plan_step !== 'string') throw new Error('plan_step must be a step ID')
+    const orchestrator = orchestration(), parent = ownership.parentTicketId
+    const ticketId = ticketOfSession(ownerSessionId)
+    if (parent && parent !== ticketId) {
+      const current = orchestrator?.store?.tickets.get(parent)
+      if (args.plan_step || current && orchestrator?.delegation.required(current))
+        throw new Error('Only the owning ticket coordinator can dispatch an iterative step')
+    }
+    if (args.plan_step && (!ticketId || !orchestrator)) throw new Error('plan_step requires an owning Super-agent ticket')
     // Runtime detection awaits; another simultaneous call may have reserved this directory meanwhile.
     if (directories.has(directoryKey)) throw new Error('A worker already owns this directory')
     const ticket = `${runtime}-${randomUUID()}`
     directories.add(directoryKey)
+    let iterative: Awaited<ReturnType<Runtime['delegation']['dispatch']>>
+    try {
+      if (ticketId && orchestrator) iterative = await orchestrator.delegation.dispatch(ticketId, args.plan_step, runtime, ticket)
+    } catch (error) {
+      directories.delete(directoryKey)
+      throw error
+    }
     const resultFile = join(stateDir, 'pool', 'results', `${ticket}.json`)
-    const spec: WorkerSpec = { ticket, directory, prompt: args.prompt, runtime,
+    const prompt = iterative ? `Complete only plan step "${args.plan_step}". Return its artifacts and verification or findings, then stop. Leave subsequent versions to the ticket coordinator.\n\n${args.prompt}`
+      + (iterative.handoff ? `\n\nCoordinator's recorded disposition of the preceding work and reviews:\n${iterative.handoff}` : '') : args.prompt
+    const spec: WorkerSpec = { ticket, directory, prompt, runtime,
       ...ownership,
       ...(runtime === 'dsh' && Object.keys(dshEnv).length ? { env: dshEnv } : {}) }
     void pool.submit(spec).then(async (outcome: WorkerOutcome) => {
       await mkdir(join(stateDir, 'pool', 'results'), { recursive: true })
-      await writeFile(resultFile, JSON.stringify(outcome), 'utf8')
+      await writeFile(`${resultFile}.tmp`, JSON.stringify(outcome), 'utf8')
+      await rename(`${resultFile}.tmp`, resultFile)
+      if (iterative && ticketId && orchestrator) {
+        orchestrator.enqueueWorkerResult(ticketId, ticket, `${runtime} worker ${ticket} for step ${args.plan_step} is ${outcome.state}. Read its result with worker_status, then record a disposition in orchestrator_plan before starting the next step.`)
+        return
+      }
       const agent = execution?.agent
       // 结果回灌：worker 结束时发起会话通常已经空闲，这条 followup 会把它叫醒。
       if (agent && ctx.agents.get(agent.id) === agent) agent.followup({ id: randomUUID(), role: 'user',
         content: [{ type: 'text', text: `${runtime} worker ${ticket} ${outcome.state}:\n${outcome.artifacts.summary}` }],
         source: { kind: 'dsh-superagent', form: 'notice', summary: `${runtime} worker completed` } })
-    }).catch(error => ctx.logger.error('worker %s: %s', ticket, String(error)))
+    }).catch(error => {
+      ctx.logger.error('worker %s: %s', ticket, String(error))
+      if (iterative && ticketId && orchestrator && !existsSync(resultFile)) {
+        orchestrator.delegation.missingResult(ticketId, ticket)
+        orchestrator.enqueueWorkerResult(ticketId, ticket, `Result of step ${args.plan_step} could not be saved. Retry that step or report a blocker.`)
+      }
+    })
       .finally(() => { directories.delete(directoryKey) })
-    return { ticket, runtime, state: 'queued', directory, resultFile, ...ownership }
+    if (iterative) execution.concludeTurn?.()
+    return { ticket, runtime, state: 'queued', directory, resultFile, ...ownership,
+      ...iterative ? { plan_step: args.plan_step, next_action: 'End this turn. The result will wake this coordinator.' } : {} }
   }
 
   /** 列出全部工单记录，或读一张工单的状态与最终结果。 */
@@ -161,7 +194,13 @@ export function installWorkers(ctx: Context, stateDir: string, options: WorkerBr
     const record = allowed.find(row => row.ticket === args.ticket)
     if (!record) throw new Error('Unknown worker or worker belongs to another Session')
     const result = await readFile(join(stateDir, 'pool', 'results', `${args.ticket}.json`), 'utf8').catch(() => undefined)
-    return result ? { ...JSON.parse(result), record } : { record, queued: pool.waiting.includes(args.ticket as string) }
+    if (!result) return { record, queued: pool.waiting.includes(args.ticket as string) }
+    const outcome = JSON.parse(result) as WorkerOutcome
+    const owner = execution?.agent?.id
+    const ticketId = owner && ticketOfSession(String(owner))
+    if (ticketId && record.ownerSessionId === owner && outcome.state === 'finished' && outcome.artifacts.summary.trim())
+      orchestration()?.delegation.readResult(ticketId, record.ticket)
+    return { ...outcome, record }
   }
 
   /** 取消排队或启动中的任务，或停止运行中的整棵进程树。 */
@@ -174,12 +213,13 @@ export function installWorkers(ctx: Context, stateDir: string, options: WorkerBr
   }
 
   const DIRECTORY = { type: 'string', description: 'Absolute existing ticket/worktree directory.' }
+  const PLAN_STEP = { type: 'string', description: 'Required in iterative mode: next step ID from orchestrator_plan. The host binds the returned worker automatically.' }
   const PROMPT = { type: 'string', description: 'Self-contained handoff: original goal, allowed read-only/writable paths, dependencies, expected result and acceptance checks. For troubleshooting include real errors and attempted approaches; for review include actual changes/evidence and request actionable findings.' }
   const RUNTIME = { type: 'string', enum: runtimes.map(runtime => runtime.name),
     description: "Who runs it: 'codex' for hard or visual work, 'dsh' for project-convention work, 'claude' for Claude Code. Omit for the first runtime this machine can start." }
 
   register('worker_start', 'Start one worker process (a real OS process, not a Session) on a directory and return a ticket at once. One worker per directory; collect the result with worker_status.', {
-    directory: DIRECTORY, prompt: PROMPT, runtime: RUNTIME,
+    directory: DIRECTORY, prompt: PROMPT, runtime: RUNTIME, plan_step: PLAN_STEP,
   }, start)
   register('worker_status', 'Read a worker state, ancestry and final answer. Omit ticket to list workers belonging to this Session or its work order. Main Sessions see their own tree. Results survive DSH restarts.', {
     ticket: { type: 'string' },
@@ -188,7 +228,7 @@ export function installWorkers(ctx: Context, stateDir: string, options: WorkerBr
 
   // 旧名字保留：既有会话与提示词里写的是 codex_worker_*，行为不变，只是固定走 Codex。
   register('codex_worker_start', 'Start a Codex process for technical consultation, required independent module review, or a difficult task. Requested consultation/review does not require prior failures. Returns immediately; bind the ticket to orchestrator_plan. Give the working directory, allowed paths, source context and acceptance checks. Do not edit that directory concurrently; collect the result with codex_worker_status.', {
-    directory: DIRECTORY, prompt: PROMPT,
+    directory: DIRECTORY, prompt: PROMPT, plan_step: PLAN_STEP,
   }, (args: any, execution: any) => start({ ...args, runtime: 'codex' }, execution))
   register('codex_worker_status', 'Read Codex worker state and final answer. Omit ticket to list recorded workers. Completed results survive DSH restarts.', {
     ticket: { type: 'string' },

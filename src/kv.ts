@@ -21,6 +21,7 @@ export function family<V, A extends unknown[] = [string]>(prefix: string, format
 
 export const KV = {
   delegation: { plan: family<TaskPlan, [ticket: string]>('delegation-plan:'),
+    readResult: family<true | 'missing', [ticket: string, worker: string]>('delegation-read-result:'),
     history: family<TaskPlan, [ticket: string, revision: number]>('delegation-history:') },
   /** Store: current database schema version. */
   store: { schema: record<number>('schema') },

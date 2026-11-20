@@ -15,8 +15,8 @@ if (!profile || !/^[a-z][a-z0-9-]{0,31}$/.test(profile) || ['web', 'headless', '
 }
 const dshBin = realpathSync(launcher)
 const dshVersion = JSON.parse(readFileSync(join(dirname(dshBin), '..', 'package.json'), 'utf8'))
-if (dshVersion.name !== '@deepseek-ai/dsh' || dshVersion.version !== '0.2.2-rc.1') {
-  throw new Error('This workspace extension is built for official DSH 0.2.2-rc.1.')
+if (dshVersion.name !== '@deepseek-ai/dsh' || dshVersion.version !== '0.2.2-rc.5') {
+  throw new Error('This workspace extension is built for official DSH 0.2.2-rc.5.')
 }
 const home = resolve(process.env.DSH_HOME || join(homedir(), '.dsh'))
 const profileDir = join(home, 'profiles', profile)

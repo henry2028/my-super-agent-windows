@@ -12,7 +12,7 @@ import { AcknowledgementSchema, readTool, tool, type Tool } from './tool.ts'
 import { PlanSchema, type Delegation } from '../delegation.ts'
 
 export interface ExecutorToolsHost {
-  readonly delegation: Pick<Delegation, 'save' | 'view' | 'assertReady' | 'stamp'>
+  readonly delegation: Pick<Delegation, 'save' | 'view' | 'assertReady' | 'stamp' | 'required'>
   readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext'>
   readonly store: Pick<Store, 'tickets' | 'replyStatus' | 'atomic'>
   readonly sessions: Pick<Sessions, 'relay' | 'notify'>
@@ -32,7 +32,8 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
       execute: async args => {
         const current = host.store.tickets.get(ticketId)
         if (!current || !liveTicket(current)) throw new Error('Ticket ended; do not resume it')
-        return args.plan ? host.delegation.save(ticketId, args.plan) : { plan: await host.delegation.view(current) ?? null }
+        return args.plan ? host.delegation.save(ticketId, args.plan)
+          : { iterative_required: host.delegation.required(current), plan: await host.delegation.view(current) ?? null }
       },
     }),
     readTool('Read one page of a resource of this ticket that the resource parameter lists. Follow next_offset, and next_resource where a page names one.',

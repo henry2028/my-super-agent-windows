@@ -238,6 +238,8 @@ export class DshExecutor implements Executor {
       retry: [5000, 300_000] })
     // Failed input deliveries are recorded on the ticket itself rather than reported through the `delivery` effect health entry (`quiet: true`).
     host.effects.handle('delivery', payload => this.deliverQueued(payload.ticketId), { limit: () => host.paused() ? 0 : 4, quiet: true })
+    host.effects.handle('worker-result', (payload, id) => this.deliverWorkerResult(payload.ticketId, id, payload.text),
+      { limit: () => host.paused() ? 0 : 1 })
   }
   /** Populates a newly accepted ticket's `execution` attributes (worktree name, workspace directory, and assignment text). */
   prepare(ticket: Ticket, outcome: Extract<AssessmentOutcome, { kind: 'accept' }>): Ticket {
@@ -331,6 +333,26 @@ export class DshExecutor implements Executor {
       }
     } finally { if (woken) this.slots.free(ticketId) }
   }
+  private async deliverWorkerResult(ticketId: string, id: string, text: string): Promise<void> {
+    await this.stopped(ticketId)
+    const ticket = this.host.store.tickets.get(ticketId)
+    if (!ticket || !liveTicket(ticket)) return
+    const assignment = runningAssignment(ticket)
+    if (!assignment || this.running(ticket) || ticket.undelivered.some(id => fromPerson(ticket.inputs.find(item => item.id === id))))
+      throw new Later('Wait for the coordinator to yield and receive pending human input')
+    this.slots.reserve(ticketId, 'wake')
+    try {
+      const sessionId = workerSessionId(ticketId)
+      if (!this.host.context.agents.get(sessionId as SessionId))
+        await this.host.sessions.ensure(sessionId, ticket.execution?.directory ?? '', ticket.title, 'worker')
+      await this.host.sessions.prompt(sessionId, `worker-result:${id}`, text, 'queue', () => {
+        const latest = this.host.store.tickets.get(ticketId)
+        if (!latest || !liveTicket(latest) || runningAssignment(latest)?.id !== assignment.id || this.host.paused())
+          throw new Later('Ticket changed before delivery')
+      })
+    } finally { this.slots.free(ticketId) }
+  }
+
   private async deliverInput(ticket: Ticket, assignment: Assignment, input: TicketInput): Promise<void> {
     // Re-check right before session delivery because the ticket may have ended while awaiting `sourceLink`.
     const live = () => {

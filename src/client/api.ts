@@ -24,6 +24,7 @@ export class ApiError extends Error {
 }
 export interface ApiMessages {
   offline: string; notRunning: string; serverError: (status: number) => string; requestFailed: (status: number) => string
+  readTimeout: string; writeTimeout: string; invalidResponse: string
   setup: (problem: SetupProblem) => string
   user: (failure: UserFailure) => string
 }
@@ -32,15 +33,23 @@ const isUserError = (code: unknown): code is UserErrorCode => typeof code === 's
 /** Calls one management endpoint; the `x-orchestrator-request` header marks the request as originating from this page. */
 async function api<T>(messages: ApiMessages, path: string, method: string, body?: unknown): Promise<T> {
   let response: Response
+  let text: string
   const json = body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
+  const readOnly = method === 'GET'
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), readOnly ? 15_000 : 60_000)
   try {
-    response = await fetch(`/orchestrator/api/${path}`, { method, ...json, headers: { 'x-orchestrator-request': '1', ...json.headers } })
+    response = await fetch(`/orchestrator/api/${path}`, { method, ...json, signal: controller.signal,
+      headers: { 'x-orchestrator-request': '1', ...json.headers } })
+    text = await response.text()
   } catch {
+    if (controller.signal.aborted) throw new ApiError(readOnly ? messages.readTimeout : messages.writeTimeout, 0, { unreachable: true })
     throw new ApiError(messages.offline, 0, { unreachable: true })
+  } finally {
+    clearTimeout(timer)
   }
-  const text = await response.text()
   let value: unknown
-  try { value = text ? JSON.parse(text) : {} } catch { value = undefined }
+  try { value = JSON.parse(text) } catch { value = undefined }
   if (!response.ok) {
     const failure = (value ?? {}) as { error?: unknown; issues?: unknown; setup?: SetupProblem; code?: unknown
       values?: Record<string, string> }
@@ -54,6 +63,7 @@ async function api<T>(messages: ApiMessages, path: string, method: string, body?
     throw new ApiError(message, status, { issues, ...failure.setup ? { setup: failure.setup } : {}, ...user ? { user } : {},
       ...text ? {} : { unreachable: true } })
   }
+  if (value === undefined) throw new ApiError(messages.invalidResponse, response.status, { unreachable: true })
   return value as T
 }
 
@@ -72,20 +82,30 @@ export function usePoll<T>(load: () => Promise<T>, deps: readonly unknown[], int
   useEffect(() => {
     let active = true
     let timer: ReturnType<typeof setTimeout> | undefined
-    // Serialize requests so a manual reload after a mutation runs after the current poll finishes.
-    let queue = Promise.resolve()
+    // Keep one trailing refresh so a mutation can reload after a poll already in flight.
+    let pending: Promise<void> | undefined
+    let trailing: Promise<void> | undefined
     const once = async () => {
-      clearTimeout(timer)
       try {
         const value = await loader.current()
         if (active) setState(previous => same(previous.data, value) ? previous.error ? { data: previous.data as T } : previous : { data: value })
       } catch (failure) {
         if (active) setState(previous => ({ ...previous, error: failure instanceof Error ? failure : new Error(String(failure)) }))
       } finally {
-        if (active) timer = setTimeout(run, document.hidden ? intervalMs * HIDDEN_FACTOR : intervalMs)
+        pending = undefined
+        if (active && !trailing) timer = setTimeout(run, document.hidden ? intervalMs * HIDDEN_FACTOR : intervalMs)
       }
     }
-    const run = () => (queue = queue.then(once))
+    const run = (): Promise<void> => {
+      clearTimeout(timer)
+      if (!active) return Promise.resolve()
+      if (trailing) return trailing
+      if (!pending) return pending = Promise.resolve().then(once)
+      return trailing = pending.then(() => {
+        trailing = undefined
+        return run()
+      })
+    }
     const shown = () => { if (!document.hidden) void run() }
     refresh.current = run
     void run()

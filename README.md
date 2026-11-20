@@ -14,12 +14,13 @@
 - **主会话和工单会话**：主会话负责路由和协调，每张工单有独立的执行会话及执行目录。会话、工单和 worker 的归属会持久保存，重启后可恢复。
 - **分工和审核**：工单可登记步骤、依赖、目录边界及审核要求，记录真实外派进程与审核结果。模型负责拆分和调用 worker，宿主检查登记的计划与完成条件，计划本身不会自动启动所有步骤。
 - **多智能体**：支持 DSH、Codex、Claude Code 和符合标准输入输出约定的自定义 CLI。进程池限制并发，同一目录的进程工作保持独占。worker 完成后结果回传给发起会话。
+- **逐版协作**：工单写明「协作模式：逐版」后，执行器将每版制作外派，等待 Codex 审核并记录处理意见，再派下一版。派工后执行器结束当前回合，结果到达后自动唤醒。需要视觉审核时可加入 Claude。
 - **恢复和可视化**：执行器处理 worker 完成通知和可继续的工作；调度甘特图显示工单、worker、步骤、依赖及状态。遇到需要人工输入或明确阻碍的情况，工单等待处理。
 - **飞书工作区**：工单机器人提供 `/ws` 文字命令，可选择工作区并保留工单及子 worker 的归属。
 
 ### 安装
 
-需要 Windows、Node.js 24 或更新版本、Git 和可访问 npm 的网络。运行 DSH、Codex、Claude 的 Windows 账号应各自完成所需登录。首次部署下载固定版本的官方 DSH 0.2.2-rc.1 和构建依赖。
+需要 Windows、Node.js 24 或更新版本、Git 和可访问 npm 的网络。运行 DSH、Codex、Claude 的 Windows 账号应各自完成所需登录。部署脚本安装官方 DSH 0.2.2-rc.5 和构建依赖，已有脚本管理的旧版运行时会升级。
 
 ```powershell
 git clone https://github.com/henry2028/my-super-agent-windows.git
@@ -33,7 +34,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Deploy.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Deploy.ps1 -Profile superagent-alt -Port 3182
 ```
 
-`-NoStart` 只安装并检查配置。`-DshBin "C:\path\to\dsh\lib\bin.js"` 可使用现有的官方 DSH 0.2.2-rc.1。首次安装加 `-Feishu` 或 `-GitHub` 可启用相应入口，后续运行保留首次使用的选项。脚本会保留已生成的用户配置。默认 DSH 数据根目录为 `%USERPROFILE%\.dsh`，也可设置 `DSH_HOME`。新用户需要在 DSH 模型设置中配置模型提供方。
+`-NoStart` 只安装并检查配置。`-DshBin "C:\path\to\dsh\lib\bin.js"` 可使用现有的官方 DSH 0.2.2-rc.5。首次安装加 `-Feishu` 或 `-GitHub` 可启用相应入口，后续运行保留首次使用的选项。脚本会保留已生成的用户配置。默认 DSH 数据根目录为 `%USERPROFILE%\.dsh`，也可设置 `DSH_HOME`。新用户需要在 DSH 模型设置中配置模型提供方。
 
 ### 连接 Codex、Claude Code 和其他 worker
 
@@ -103,12 +104,13 @@ This is a research prototype. Validate it in your environment before relying on 
 - **Sessions and ownership:** a main session routes work; each ticket has an execution session and directory. Session, ticket, and worker ownership are persisted for recovery after restart.
 - **Delegation and review:** record steps, dependencies, directory boundaries, required reviews, actual worker processes, and review outcomes. The model splits and starts work; the host checks the recorded plan and completion requirements. A plan does not automatically launch every step.
 - **Multiple agents:** run DSH, Codex, Claude Code, and custom CLI workers that implement the stdin/stdout contract. The pool limits concurrency and reserves a working directory for one process at a time. Results return to the requesting session.
+- **Iterative handoffs:** request “iterative delegation” to dispatch each version to a worker, wait for Codex review, record the disposition, and then start the next version. The coordinator yields after dispatch and wakes when results arrive. Claude can be included for visual review.
 - **Recovery and visibility:** the executor handles worker completion and resumable work. The scheduling Gantt shows tickets, workers, steps, dependencies, and states. Tickets can wait for human input or a blocker to be resolved.
 - **Feishu workspaces:** the work-order bot offers `/ws` text commands and preserves ticket and child-worker placement.
 
 ### Installation
 
-You need Windows, Node.js 24 or later, Git, and access to npm. Use the same Windows account for DSH and the agent CLIs, and complete each CLI's own login. The first installation downloads official DSH 0.2.2-rc.1 and build dependencies.
+You need Windows, Node.js 24 or later, Git, and access to npm. Use the same Windows account for DSH and the agent CLIs, and complete each CLI's own login. The installer downloads official DSH 0.2.2-rc.5 and build dependencies, upgrading an older installer-managed runtime.
 
 ```powershell
 git clone https://github.com/henry2028/my-super-agent-windows.git
@@ -122,7 +124,7 @@ The script creates a dedicated `superagent-windows` profile on `127.0.0.1:3082`.
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Deploy.ps1 -Profile superagent-alt -Port 3182
 ```
 
-Use `-NoStart` to install and check configuration without starting the service. Use `-DshBin "C:\path\to\dsh\lib\bin.js"` to reuse an existing official DSH 0.2.2-rc.1 installation. Add `-Feishu` or `-GitHub` on initial installation to enable those sources, and retain the same options on later runs. Generated user configuration is preserved. The default DSH home is `%USERPROFILE%\.dsh`; `DSH_HOME` can select another location. New DSH users must configure a model provider in DSH settings.
+Use `-NoStart` to install and check configuration without starting the service. Use `-DshBin "C:\path\to\dsh\lib\bin.js"` to reuse an existing official DSH 0.2.2-rc.5 installation. Add `-Feishu` or `-GitHub` on initial installation to enable those sources, and retain the same options on later runs. Generated user configuration is preserved. The default DSH home is `%USERPROFILE%\.dsh`; `DSH_HOME` can select another location. New DSH users must configure a model provider in DSH settings.
 
 ### Connect Codex, Claude Code, and other workers
 

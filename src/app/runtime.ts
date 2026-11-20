@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-subprocess'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
@@ -137,7 +137,8 @@ export class Runtime extends Service implements SourceHost {
       const executorHost = { context: ctx, get engine() { return runtime.engine }, store, effects, health: board.claim('worker'), machine,
         lifetime: this.lifetime, sessions, closing: () => this.closing(), paused: () => this.paused(), environment, sourceLink: link,
         delegates: async (sessionId: string) => (await this.workers?.records() ?? []).some(row =>
-          row.ownerSessionId === sessionId && ['queued', 'starting', 'running'].includes(row.state)),
+          row.ownerSessionId === sessionId && (['queued', 'starting', 'running'].includes(row.state)
+            || effects.pending('worker-result', row.ticket))),
         repliedTo: (trigger: Trigger) => repliedTo({ store, sources }, trigger) }
       // 设置里选了进程模式，就每票起一个 dsh 进程；默认仍是宿主内 Session。
       this.executor = store.settings().executor.mode === 'process' ? new ProcessExecutor(executorHost) : new DshExecutor(executorHost)
@@ -206,6 +207,9 @@ export class Runtime extends Service implements SourceHost {
   checkSetup(): void { this.setup.check() }
   receive(trigger: Trigger): ReceiveResult { return this.passes.receive(trigger) }
   idle(): Promise<void> { return this.passes.idle() }
+  enqueueWorkerResult(ticketId: string, workerId: string, text: string): void {
+    this.effects.enqueue('worker-result', workerId, { ticketId, text })
+  }
   pump(): Promise<void> { return this.passes.pump() }
   sendReplies(): Promise<void> { return this.outbox.sent() }
   private closing(): boolean { return this.closingFlag }
@@ -226,9 +230,27 @@ export class Runtime extends Service implements SourceHost {
     // If stop() was called while awaiting setup, session creation, or policy sync, do not start background loops.
     if (this.closing()) return
     this.executor.resume()
+    await this.recoverWorkerResults()
     this.passes.start()
     this.effects.start()
     this.runtimeHealth.set({ state: 'ready', detail: 'Orchestrator is ready', at: now() })
+  }
+  private async recoverWorkerResults(): Promise<void> {
+    if (!(this.executor instanceof DshExecutor) || !this.workers) return
+    const tickets = this.store.tickets.open().filter(ticket => this.store.get(KV.delegation.plan(ticket.id))?.mode === 'iterative')
+    if (!tickets.length) return
+    const records = await this.workers.records()
+    for (const ticket of tickets) {
+      const plan = await this.delegation.view(ticket, records)
+      const step = plan?.steps.find(step => step.state !== 'finished')
+      const workerId = step?.worker_ticket
+      if (!workerId || step && ['queued', 'starting', 'running'].includes(step.state) || this.effects.pending('worker-result', workerId)) continue
+      const saved = existsSync(join(this.machine.stateDir, 'pool', 'results', `${workerId}.json`))
+      if (!saved) this.delegation.missingResult(ticket.id, workerId)
+      this.enqueueWorkerResult(ticket.id, workerId, saved
+        ? `Worker ${workerId} for step ${step!.id} returned. Read via worker_status and record its disposition before dispatch.`
+        : `Worker ${workerId} for step ${step!.id} was interrupted before its result was saved. Retry this step or report a blocker.`)
+    }
   }
   private httpHost(): HttpHost {
     const runtime = this

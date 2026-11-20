@@ -92,8 +92,9 @@ export function scheduleRows(tickets: Ticket[], records: WorkerRecord[], now = D
       const metadata = { parentTicketId: plan.ticketId, taskKind: step.kind, dependsOn: step.depends_on,
         isUnfinished: parent.canStop && (plan.stale || step.state !== 'finished'),
         summary: [step.scope, step.evidence, step.worker?.detail].filter(Boolean).join('\n\n') }
-      if (row) Object.assign(row, metadata, { title: step.title, state: step.state })
-      else rows.push({ ...metadata, id: `plan:${plan.ticketId}:${step.id}`, kind: 'plan', title: step.title,
+      const title = step.round ? `v${step.round} · ${step.title}` : step.title
+      if (row) Object.assign(row, metadata, { title, state: step.state })
+      else rows.push({ ...metadata, id: `plan:${plan.ticketId}:${step.id}`, kind: 'plan', title,
         runtime: step.runtime, state: plan.stale ? 'stale' : step.state, ownerSessionId: `worker-${plan.ticketId}`,
         canStop: false, lastActivityAt: step.completedAt ?? plan.updatedAt,
         segments: [{ phase: 'waiting', from: plan.updatedAt, ...(step.completedAt ? { from: step.completedAt, to: step.completedAt } :
